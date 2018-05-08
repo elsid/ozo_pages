@@ -13,9 +13,9 @@ style:
 ### ![](themes/yandex2/images/title-logo-{{ site.presentation.lang }}.svg){{ site.presentation.service }}
 
 <div class="authors">
-{% if site.author %}
-<p>{{ site.author.name }}{% if site.author.position %}, {{ site.author.position }}{% endif %}</p>
-{% endif %}
+{% if site.author%}
+<p>{{ site.author.name }}{% if site.author.position%}, {{ site.author.position }}{% endif%}</p>
+{% endif%}
 
 </div>
 
@@ -57,15 +57,6 @@ style:
   - {:.next}Only text protocol
   - {:.next}Synchronous I/O
 
-## Why do we make yet another library?
-
-- Internal solution: apq
-  - {:.next}Without unit tests
-  - {:.next}Only callbacks interface
-  - {:.next}Only textual composite parameters
-  - {:.next}Boilerplate to make query
-  - {:.next}Synchronous send for query parameter
-
 ## What is our proposal?
 
 - Asynchronous I/O
@@ -95,7 +86,8 @@ const auto query = "SELECT mid, st_id, attaches"_SQL
     + "  AND mid = ANY("_SQL + mids + "::code.mids)"_SQL;
 using row_t = std::tuple<int, std::string, std::vector<attach>>;
 std::vector<row_t> result;
-ozo::request(provider, query, std::back_inserter(result), asio::use_future);
+auto connection = ozo::request(provider, query, std::back_inserter(result),
+    asio::use_future);
 ```
 
 ## How does it work?
@@ -120,9 +112,9 @@ ozo::request(provider, query, std::back_inserter(result), asio::use_future);
 ## Connection provider
 
 ```c++
+asio::io_context io;
 const auto oid_map = ozo::register_types<attach>();
-using oid_map_t = decltype(oid_map);
-ozo::connection_info<oid_map_t> connection_info(io,
+ozo::connection_info<decltype(oid_map)> connection_info(io,
         "host=localhost"); // connection provider
 
 ozo::connection_pool_config config;
@@ -131,11 +123,31 @@ auto pool = ozo::make_connection_pool(connection_info, config);
 auto provider = ozo::make_provider(io, pool); // connection provider
 ```
 
+## Connection provider concept
+
+```c++
+template <typename, typename = std::void_t<>>
+struct is_connection_provider : std::false_type {};
+
+template <typename T>
+struct is_connection_provider<T, std::void_t<decltype(
+    async_get_connection(
+        std::declval<T&>(),
+        std::declval<std::function<void(error_code, connectable_type<T>)>>()
+    )
+)>> : std::true_type {};
+
+template <typename T>
+constexpr auto ConnectionProvider =
+    is_connection_provider<std::decay_t<T>>::value;
+```
+
 ## Connection concept
 
 ```c++
 template <typename, typename = std::void_t<>>
 struct is_connection : std::false_type {};
+
 template <typename T>
 struct is_connection<T, std::void_t<
     decltype(get_connection_socket(std::declval<T&>())),
@@ -144,8 +156,9 @@ struct is_connection<T, std::void_t<
     decltype(get_connection_statistics(std::declval<T&>())),
     // same for const ...
 >> : std::true_type {};
+
 template <typename T>
-constexpr auto Connection = is_connection<std::decay_t<T>>::value; // concept
+constexpr auto Connection = is_connection<std::decay_t<T>>::value;
 ```
 
 ## User connection type
@@ -179,6 +192,9 @@ constexpr auto ConnectionWrapper = is_connection_wrapper<std::decay_t<T>>::value
 ## Unwrap connection
 
 ```c++
+template <bool Condition, typename Type = void>
+using Require = std::enable_if_t<Condition, Type>;
+// ...
 template <typename T>
 decltype(auto) unwrap_connection(T&& conn,
         Require<!ConnectionWrapper<T>>* = 0) noexcept {
@@ -253,7 +269,8 @@ const auto query = "SELECT mid, st_id, attaches"_SQL
     + "  AND mid = ANY("_SQL + mids + "::code.mids)"_SQL;
 using row_t = std::tuple<int, std::string, std::vector<attach>>;
 std::vector<row_t> result;
-ozo::request(provider, query, std::back_inserter(result), asio::use_future);
+auto connection = ozo::request(provider, query, std::back_inserter(result),
+    asio::use_future);
 ```
 
 ## User defined type
@@ -319,7 +336,8 @@ const auto query = "SELECT mid, st_id, attaches"_SQL
     + "  AND mid = ANY("_SQL + mids + "::code.mids)"_SQL; // <-- Look close here
 using row_t = std::tuple<int, std::string, std::vector<attach>>;
 std::vector<row_t> result;
-ozo::request(provider, query, std::back_inserter(result), asio::use_future);
+auto connection = ozo::request(provider, query, std::back_inserter(result),
+    asio::use_future);
 ```
 
 ## Ideas for query builder
@@ -347,16 +365,19 @@ SELECT mid, st_id, attaches
 ## Query template
 
 ```c++
+std::int64_t uid;
+std::string st_id;
+std::int64_t mid;
+std::vector<attach> attaches;
+// ...
 const auto query = (
     "INSERT INTO mail.messages (uid, mid, st_id, attaches)"_SQL
-    + "VALUES ("_SQL
-        + std::cref(uid)
+    + "VALUES ("_SQL + std::cref(uid)
         + ", "_SQL + std::cref(uid)
         + ", "_SQL + std::cref(st_id)
-        + ", "_SQL + std::cref(attaches)
-    + ")"_SQL
+        + ", "_SQL + std::cref(attaches) + ")"_SQL
 ).build();
-
+// ...
 std::tie(uid, mid, st_id, attaches) = /*...*/;
 ```
 
@@ -445,7 +466,8 @@ const auto query = "SELECT mid, st_id, attaches"_SQL
     + "  AND mid = ANY("_SQL + mids + "::code.mids)"_SQL;
 using row_t = std::tuple<int, std::string, std::vector<attach>>;
 std::vector<row_t> result; // <-- Look closer here
-ozo::request(provider, query, std::back_inserter(result), asio::use_future);
+auto connection = ozo::request(provider, query, std::back_inserter(result),
+    asio::use_future);
 ```
 
 ## Ideas for result
@@ -528,8 +550,8 @@ const auto query = "SELECT mid, st_id, attaches"_SQL
     + "  AND mid = ANY("_SQL + mids + "::code.mids)"_SQL;
 using row_t = std::tuple<int, std::string, std::vector<attach>>;
 std::vector<row_t> result;
-ozo::request(provider, query, std::back_inserter(result),
-             asio::use_future); // <-- Look close here
+auto connection = ozo::request(provider, query, std::back_inserter(result),
+    asio::use_future); // <-- Look close here
 ```
 
 ## Asynchronous completion token
@@ -550,16 +572,32 @@ asio::spawn(io, [] (asio::yield_context yield) {
 });
 ```
 
+## Convert completion token into callback
+
+```c++
+template <typename P, typename Q, typename Out,
+    typename CompletionToken, typename = Require<ConnectionProvider<P>>>
+auto request(P&& provider, Q&& query, Out&& out, CompletionToken&& token) {
+    using signature_t = void (error_code, connectable_type<P>);
+    async_completion<CompletionToken, signature_t> init(token);
+
+    async_request(std::forward<P>(provider), std::forward<Q>(query),
+                  std::forward<Out>(out), init.completion_handler);
+
+    return init.result.get();
+}
+```
+
 ## Transactions: naive implementation
 
 ```c++
 auto conn = ozo::get_connection(conn_info, yield);
 ozo::result result;
 ozo::request(conn, "BEGIN"_SQL, result, yield);
-/* ... */
+// ...
 ozo::request(conn, "COMMIT"_SQL, result, yield);
 ozo::request(conn, "COMMIT"_SQL, result, yield); // database warning
-/* ... */
+// ...
 ozo::request(conn, "BEGIN"_SQL, result, yield);
 ozo::request(conn, "BEGIN"_SQL, result, yield); // database warning
 ```
@@ -569,11 +607,11 @@ ozo::request(conn, "BEGIN"_SQL, result, yield); // database warning
 ```c++
 ozo::result result;
 auto transaction = ozo::transaction(conn_info, result, yield);
-/*...*/
+// ...
 ozo::request(transaction, "..."_SQL, result, yield);
-/*...*/
+// ...
 auto conn = ozo::commit(transaction, result, yield);
-/*...*/
+// ...
 ozo::rollback(conn, result, yield); // compile error
 transaction = ozo::transaction(conn, result, yield); // ok
 ```
@@ -582,18 +620,6 @@ transaction = ozo::transaction(conn, result, yield); // ok
 
 - Unknown or expected large result size
 - {:.next}Streaming
-
-<!-- ## Read row by row: library resposibility
-
-```c++
-auto on_row = [] (error_code ec, auto row) { /*...*/ };
-auto on_end = [] (error_code ec, auto conn) { /*...*/ };
-ozo::request_by_rows(conn, query, cursor, on_row, on_end);
-```
-
-## Read row by row: library resposibility
-
-- ??? -->
 
 ## Read database result row by row
 
@@ -622,7 +648,72 @@ ozo::request(conn, query, *cursor,
             // ...
 ```
 
-<!-- ## Retries -->
+## .
+
+```c++
+asio::io_context io;
+asio::io_context::strand strand(io);
+asio::spawn(io, [&] (asio::yield_context yield) {
+    asio::async_completion<asio::yield_context, void (std::shared_ptr<int>)> init(yield);
+    asio::post(io, [&io, &strand, h = std::move(init.completion_handler)] {
+        asio::post(io,
+            strand.wrap([h = std::move(h), ptr = std::make_shared<int>()] () mutable {
+                h(std::move(ptr));
+            }));
+    });
+    const auto ptr = init.result.get();
+    std::cout << ptr.use_count() << std::endl;
+});
+io.run();
+```
+
+## Use latest Boost.Asio API
+
+```c++
+asio::spawn(io, [&] (asio::yield_context yield) {
+    asio::async_completion<asio::yield_context, void (std::shared_ptr<int>)> init(yield);
+    asio::post(io, [&io, &strand, h = std::move(init.completion_handler)] {
+        asio::post(io,
+            asio::bind_executor(strand, [h = std::move(h), ptr = std::make_shared<int>()] () mutable {
+                h(std::move(ptr));
+            }));
+    });
+    const auto ptr = init.result.get();
+    std::cout << ptr.use_count() << std::endl;
+});
+```
+
+## .
+
+```c++
+void my_deep_recursion() {
+    if (!stop_it) {
+        my_deep_recursion();
+    }
+}
+
+asio::spawn(io, [] (asio::yield_context yield) {
+    // ...
+    my_deep_recursion();
+    // ...
+});
+```
+
+## Check coroutine stack size
+
+```c++
+void my_deep_recursion() {
+    if (!stop_it) {
+        my_deep_recursion();
+    }
+}
+
+asio::spawn(io, [] (asio::yield_context yield) {
+    // ...
+    my_deep_recursion();
+    // ...
+}, coroutine::attributes(stack_size));
+```
 
 ## Tests
 {:.section}
@@ -670,55 +761,290 @@ struct connection_mock {
 };
 ```
 
-## Integration tests: setup environment
+## Docker image to build the project
+
+```dockerfile
+FROM ubuntu:17.10
+RUN apt-get update && apt-get install -y ccache clang-5.0 ...
+RUN wget -qO boost_1_67_0.tar.gz https://sourceforge.net/projects/boost/... && \
+    tar xzf boost_1_67_0.tar.gz && \
+    cd boost_1_67_0 && \
+    ./bootstrap.sh --with-libraries=system,thread,chrono,... && \
+    ./b2 ...
+VOLUME /ccache
+VOLUME /code
+WORKDIR /code
+ENV CCACHE_DIR=/ccache
+```
+
+## Docker-compose to organize containers
+
+```yaml
+version: '3'
+services:
+  ozo_build:
+    build: docker/build
+    image: ozo_build
+    volumes: ["~/.ccache:/ccache", ".:/code"]
+  ozo_postgres: {"image": "postgres:alpine", "networks": ["ozo"]}
+  ozo_build_with_pg_tests:
+    build: docker/build
+    image: ozo_build
+    depends_on: ["ozo_postgres"]
+    volumes: ["~/.ccache:/ccache", ".:/code"]
+    networks: ["ozo"]
+networks: [{"ozo": {}]
+```
+
+## Build and run tests
 
 ```bash
-docker pull postgres:alpine
-docker run -d -p 5432:5432/tcp postgres:alpine
-OZO_PG_TEST_CONNINFO='host=localhost user=postgres'
-cmake -DOZO_PG_TEST_CONNINFO="${OZO_PG_TEST_CONNINFO}"
+# only with unit tests
+docker-compose run --rm --user "$(id -u):$(id -g)" ozo_build scripts/build.sh
+
+# with integration tests
+docker-compose up -d ozo_postgres
+docker-compose run --rm --user "$(id -u):$(id -g)" \
+    ozo_build_with_pg_tests scripts/build.sh
+docker-compose stop ozo_postgres
+docker-compose rm ozo_postgres
+
+#scripts/build.sh
+cmake
+make
+ctest
 ```
 
-## Integration tests
+## Integration test example
 
 ```c++
-ozo::io_context io;
-ozo::connection_info<> conn_info(io, OZO_PG_TEST_CONNINFO);
-ozo::result res;
-ozo::request(conn_info, "SELECT "_SQL + std::string("foo"), res,
-    [&] (ozo::error_code ec, auto conn) {
-        ASSERT_FALSE(ec) << ec.message() << " | " << error_message(conn)
-            << " | " << get_error_context(conn);
-        EXPECT_EQ(1, res.size());
-        EXPECT_EQ(1, res[0].size());
-        EXPECT_EQ(std::string("foo"), res[0][0].data());
-        EXPECT_FALSE(ozo::connection_bad(conn));
-    });
+GTEST("ozo::request") {
+    SHOULD("return selected variable") {
+        ozo::io_context io;
+        ozo::connection_info<> conn_info(io, OZO_PG_TEST_CONNINFO);
+        ozo::result res;
+        ozo::request(conn_info, "SELECT "_SQL + std::string("foo"), res,
+            [&] (ozo::error_code ec, auto conn) {
+                ASSERT_FALSE(ec) << ec.message() << " | " << error_message(conn)
+                    << " | " << get_error_context(conn);
+                EXPECT_EQ(1, res.size());
+                EXPECT_EQ(1, res[0].size());
+                EXPECT_EQ(std::string("foo"), res[0][0].data());
+                EXPECT_FALSE(ozo::connection_bad(conn));
+            });
 ```
 
-<!-- ## Performance
+## Performance
 {:.section}
 
-## Hardware
+## Benchmarks setup
+{:.images}
 
-## Single connection
+![](diagrams/benchmark_setup.svg)
+
+## Basic benchmark
+
+```c++
+Benchmark benchmark;
+asio::io_context io(1);
+ozo::connection_info<> connection_info(io, conn_string);
+const auto query = "SELECT 1"_SQL.build();
+asio::spawn(io, [&] (auto yield) {
+    while (true) {
+        ozo::result result;
+        ozo::request(connection_info, query, result, yield);
+        if (!benchmark.step(result.size())) {
+            break;
+        }
+    }
+});
+io.run();
+```
+
+## Basic benchmark
+
+| request speed, req/sec | request time (90% quantile), ms |
++------------------------|---------------------------------+
+| 493                    | 2.135                           |
+
+## Reuse connection
+
+```c++
+// ...
+asio::spawn(io, [&] (auto yield) {
+    auto connection = ozo::get_connection(connection_info, yield);
+    while (true) {
+        ozo::result result;
+        ozo::request(connection, query, result, yield);
+        if (!benchmark.step(result.size())) {
+            break;
+        }
+    }
+});
+// ...
+```
+
+## Reuse connection vs basic benchmark
+
+| name             |  request speed, req/sec | request time, us |
++------------------|-------------------------|------------------+
+| basic            |  493                    | 2135 (2346%)     |
+| reuse connection |  11353                  | 91 (100%)        |
+
+## Use connection pool
+
+```c++
+// ...
+auto pool = ozo::make_connection_pool(connection_info, config);
+auto provider = ozo::make_provider(pool, io);
+asio::spawn(io, [&] (auto yield) {
+    while (true) {
+        ozo::result result;
+        ozo::request(provider, query, result, yield);
+        if (!benchmark.step(result.size())) {
+            break;
+        }
+    }
+});
+// ...
+```
+
+## Use connection pool vs reuse connection
+
+|  name            |  request speed, req/sec |  request time, us |
++------------------|-------------------------|-------------------+
+| reuse connection |  11353                  |  91 (100%)        |
+| connection pool  |  9902                   |  107 (121%)       |
+
+## Use connection pool and parsed result
+
+```c++
+// ...
+asio::spawn(io, [&] (auto yield) {
+    while (true) {
+        std::vector<std::tuple<std::int32_t>> result;
+        ozo::request(provider, query, std::back_inserter(result), yield);
+        if (!benchmark.step(result.size())) {
+            break;
+        }
+    }
+});
+// ...
+```
+
+## Parsed result vs raw result
+
+| name          | request speed, req/sec | request time, us |
++---------------|------------------------|------------------+
+| raw result    | 9902                   | 107 (100%)       |
+| parsed result | 9170                   | 119 (111%)       |
+
+## Complex query
+
+```c++
+// ...
+const auto query = ("SELECT typname, typnamespace, typowner, typlen, "_SQL
+    + "typbyval, typcategory, typispreferred, typisdefined, typdelim, "_SQL
+    + "typrelid, typelem, typarray "_SQL
+    + "FROM pg_type WHERE typtypmod = "_SQL + -1 + " AND typisdefined = "_SQL
+    + true).build();
+asio::spawn(io, [&] (auto yield) {
+    while (true) {
+        ozo::result result;
+        ozo::request(provider, query, result, yield);
+        if (!benchmark.step(result.size())) { break; }
+    }
+});
+// ...
+```
+
+## Complex query vs simple query
+
+| name                     | request speed, req/sec | request time, us | read rows speed, row/sec |
++--------------------------|------------------------|------------------|--------------------------+
+| simple query (1 row)     | 9902                   | 107 (100%)       | 9902 (100%)              |
+| complex query (373 rows) | 1091                   | 969 (906%)       | 406843 (4109%)           |
+
+## Complex query: parsed result
+
+```c++
+struct pg_type {
+    // ...
+};
+BOOST_FUSION_ADAPT_STRUCT(pg_type, /* ... */)
+// ...
+asio::spawn(io, [&] (auto yield) {
+    while (true) {
+        std::vector<pg_type> result;
+        ozo::request(provider, query, std::back_inserter(result), yield);
+        if (!benchmark.step(result.size())) {
+            break;
+        }
+    }
+});
+// ...
+```
+
+## Parsed result vs raw result (complex query)
+
+| name          | request speed, req/sec | request time, ms | read rows speed, row/sec |
++---------------|------------------------|------------------|--------------------------+
+| raw result    | 1091                   | 0.963 (100%)     | 406843 (432%)            |
+| parsed result | 253                    | 4.076 (423%)     | 94221 (100%)             |
 
 ## Multiple connections
 
-## Compare to asyncpg -->
+```c++
+auto pool = ozo::make_connection_pool(connection_info, n + 1, 0);
+// ...
+for (std::size_t i = 0; i < n; ++i) {
+    asio::spawn(io, [i, &] (auto yield) {
+        while (true) {
+            ozo:result result;
+            ozo::request(provider, query, std::back_inserter(result), yield);
+            if (!benchmark.step(result.size(), i)) {
+                break;
+            }
+        }
+    });
+}
+// ...
+```
+
+## Raw result
+
+| connections | request speed, req/sec | request time, ms | read rows speed, row/sec |
++-------------|------------------------|------------------|--------------------------+
+| 1           | 1091                   | 0.963 (100%)     | 406843 (100%)            |
+| 2           | 2141                   | 1.035 (107%)     | 798528 (196%)            |
+| 4           | 3507                   | 1.225 (127%)     | 1308121 (322%)           |
+| 8           | 4253                   | 2.064 (214%)     | 1586623 (390%)           |
+| 16          | 5155                   | 3.453 (359%)     | 1922983 (473%)           |
+| 32          | 5707                   | 6.429 (668%)     | 2128794 (523%)           |
+| 64          | 5496                   | 12.1884 (1266%)  | 2050109 (504%)           |
+
+## Parsed result
+
+| connections | request speed, req/sec | request time, ms | read rows speed, row/sec |
++-------------|------------------------|------------------|--------------------------+
+| 1           | 253                    | 4.076 (100%)     | 94221 (100%)             |
+| 2           | 313                    | 6.604 (169%)     | 116819 (124%)            |
+| 4           | 320                    | 12.801 (314%)    | 119266 (127%)            |
+| 8           | 299                    | 27.369 (672%)    | 111551 (118%)            |
 
 ## Questions?
 {:.contacts}
 
-{% if site.author %}
+{% if site.author%}
 
 <figure markdown="1">
 
 ### {{ site.author.name }}
 
-{% endif %}
+{% endif%}
 
 -------
 
 - {:.mail}elsid@yandex-team.ru
+- {:.github}[https://github.com/elsid](https://github.com/elsid)
 - {:.github}[https://github.com/YandexMail/ozo](https://github.com/YandexMail/ozo) (pull requests are welcome)
