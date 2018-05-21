@@ -654,10 +654,11 @@ ozo::request(conn, query, *cursor,
 asio::io_context io;
 asio::io_context::strand strand(io);
 asio::spawn(io, [&] (asio::yield_context yield) {
-    asio::async_completion<asio::yield_context, void (std::shared_ptr<int>)> init(yield);
+    asio::async_completion<asio::yield_context, void (std::shared_ptr<int>)>
+        init(yield);
     asio::post(io, [&io, &strand, h = std::move(init.completion_handler)] {
-        asio::post(io,
-            strand.wrap([h = std::move(h), ptr = std::make_shared<int>()] () mutable {
+        asio::post(io, strand.wrap([h = std::move(h),
+            ptr = std::make_shared<int>()] () mutable {
                 h(std::move(ptr));
             }));
     });
@@ -671,10 +672,11 @@ io.run();
 
 ```c++
 asio::spawn(io, [&] (asio::yield_context yield) {
-    asio::async_completion<asio::yield_context, void (std::shared_ptr<int>)> init(yield);
+    asio::async_completion<asio::yield_context, void (std::shared_ptr<int>)>
+        init(yield);
     asio::post(io, [&io, &strand, h = std::move(init.completion_handler)] {
-        asio::post(io,
-            asio::bind_executor(strand, [h = std::move(h), ptr = std::make_shared<int>()] () mutable {
+        asio::post(io, asio::bind_executor(strand, [h = std::move(h),
+            ptr = std::make_shared<int>()] () mutable {
                 h(std::move(ptr));
             }));
     });
